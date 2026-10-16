@@ -54,13 +54,6 @@ SPY-implied 7667), strike pick, BUY_TO_OPEN preview (accepted, est. $1,660).
 behavior, SELL_TO_CLOSE, and the **positions shape for an SPXW position**
 (`findHeldCall()` accepts position `symbol` of either `SPX` or `SPXW` since the
 real one is unseen; check this first if a resume/exit ever misses a position).
-Not yet pushed to GitHub, no cron-job.org job, no repo secrets.
+Hosting set up 2026-10-16: public repo `Pedrazar/webull-spx-0dte-agent`, 4 repo secrets, cron-job.org dispatch (`20 7 * * 1-5` America/Los_Angeles). First scheduled run: Monday 2026-10-19.
 
-## To go live
-
-1. `git init`, create a public repo (e.g. `Pedrazar/webull-spx-0dte-agent`), push.
-2. Add secrets `WEBULL_APP_KEY`, `WEBULL_APP_SECRET`, `WEBULL_BASE_URL`,
-   `WEBULL_SANDBOX_ACCOUNT_ID`.
-3. Add a cron-job.org job like the SPY one, pointing at `spx-0dte.yml`
-   (`20 7 * * 1-5`, America/Los_Angeles). Don't dispatch before 10:10am ET.
-4. Both agents share one paper account; each only matches its own symbol.
+Both agents share one paper account; each only matches its own symbol.

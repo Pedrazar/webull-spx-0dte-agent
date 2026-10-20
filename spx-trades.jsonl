@@ -1,2 +1,4 @@
 {"ts":"2026-10-19T14:30:19.056Z","event":"entry_filled","optionSymbol":"SPXW261019C07700000","strike":7700,"expiration":"2026-10-19","contracts":1,"entryPrice":19,"totalCost":1900,"underlyingPrice":7710.2,"targetStrike":7700.2,"clientOrderId":"02db157b93d04f45bd5038681153c060"}
 {"ts":"2026-10-19T16:59:44.737Z","event":"exit_filled","optionSymbol":"SPXW261019C07700000","reason":"stop_loss","contracts":1,"entryPrice":19,"exitPrice":9.5,"realizedPnl":-950,"pctReturn":-50}
+{"ts":"2026-10-20T14:30:21.120Z","event":"entry_filled","optionSymbol":"SPXW261020C07735000","strike":7735,"expiration":"2026-10-20","contracts":1,"entryPrice":19.8,"totalCost":1980,"underlyingPrice":7744.05,"targetStrike":7734.05,"clientOrderId":"ce3c37839ae24311880636d7d7a5bfee"}
+{"ts":"2026-10-20T15:12:36.932Z","event":"exit_filled","optionSymbol":"SPXW261020C07735000","reason":"stop_loss","contracts":1,"entryPrice":19.8,"exitPrice":7.3,"realizedPnl":-1250,"pctReturn":-63.13}

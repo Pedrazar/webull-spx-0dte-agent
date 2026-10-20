@@ -57,3 +57,14 @@ real one is unseen; check this first if a resume/exit ever misses a position).
 Hosting set up 2026-10-16: public repo `Pedrazar/webull-spx-0dte-agent`, 4 repo secrets, cron-job.org dispatch (`20 7 * * 1-5` America/Los_Angeles). First scheduled run: Monday 2026-10-19.
 
 Both agents share one paper account; each only matches its own symbol.
+
+## Change log
+
+- **2026-10-19: broker-position lookups now retry.** The sibling SPY live agent
+  crashed on a 429 from `/trading/assets/positions/list` right after its
+  stop-loss sell filled (red run, no `exit_filled` logged). `findHeldCall()`
+  now retries 6x with backoff and only throws if the broker stays unreachable;
+  the post-exit check logs `exit_failed` (never a false "closed") instead of
+  crashing, and the 5-minute reconcile in `monitor()` just skips a cycle.
+  Not yet exercised live. First SPX day (2026-10-19): -$950, stop at -50%,
+  all mechanics worked.

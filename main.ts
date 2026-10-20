@@ -221,7 +221,7 @@ interface HeldCall {
 }
 
 /** Today's long SPXW 0DTE call, if the broker says we hold one. */
-async function findHeldCall(client: WebullClient, accountId: string): Promise<HeldCall | null> {
+async function findHeldCallOnce(client: WebullClient, accountId: string): Promise<HeldCall | null> {
   const today = todayNyDate();
   const positions: Position[] = await getPositions(client, accountId);
   for (const p of positions) {
@@ -242,6 +242,27 @@ async function findHeldCall(client: WebullClient, accountId: string): Promise<He
     };
   }
   return null;
+}
+
+/** findHeldCallOnce() with retries. SEEN LIVE 2026-10-19 in the sibling SPY
+ * live agent: a 429 from the positions endpoint, right AFTER a stop-loss
+ * sell had filled, was unguarded and crashed the whole run (red Actions
+ * run, no exit_filled event logged). Every caller asks the broker "what do
+ * we hold?", and a transient failure must never be read as an answer, so
+ * this retries with backoff and only throws if the broker stays unreachable
+ * (~45s); callers that can tolerate "unknown" catch that. */
+async function findHeldCall(client: WebullClient, accountId: string): Promise<HeldCall | null> {
+  let lastErr: unknown;
+  for (let i = 0; i < 6; i++) {
+    try {
+      return await findHeldCallOnce(client, accountId);
+    } catch (err) {
+      lastErr = err;
+      console.warn(`[positions] lookup failed (try ${i + 1}/6), retrying:`, err);
+      await sleep(3000 * (i + 1));
+    }
+  }
+  throw lastErr;
 }
 
 function occ(expiration: string, strike: number): string {
@@ -509,12 +530,21 @@ async function exitPosition(
     }
   }
 
-  if (await findHeldCall(client, accountId)) {
+  let stillHeld: boolean;
+  try {
+    stillHeld = (await findHeldCall(client, accountId)) !== null;
+  } catch (err) {
+    // Positions unreachable even after retries: we can't claim the exit
+    // succeeded, and we must not crash before logging. Fail loudly instead.
+    console.error("[exit] could not confirm final position:", err);
+    stillHeld = true;
+  }
+  if (stillHeld) {
     logEvent({
       event: "exit_failed",
       optionSymbol: held.optionSymbol,
       reason,
-      detail: `still holding after retrying until ${hhmm(giveUpAtMin)} ET — CLOSE MANUALLY; SPXW is cash-settled so there is no share assignment, but the position rides to expiry unmanaged and settles at intrinsic value (or zero)`,
+      detail: `still holding (or position status unconfirmed) after retrying until ${hhmm(giveUpAtMin)} ET — CHECK AND CLOSE MANUALLY; SPXW is cash-settled so there is no share assignment, but the position rides to expiry unmanaged and settles at intrinsic value (or zero)`,
     });
     return false;
   }
@@ -566,9 +596,13 @@ async function monitor(client: WebullClient, accountId: string, held: HeldCall):
     // could be closed by hand in the app).
     if (Date.now() - lastReconcile >= 300_000) {
       lastReconcile = Date.now();
-      if (!(await findHeldCall(client, accountId))) {
-        logEvent({ event: "position_gone", optionSymbol: held.optionSymbol, detail: "broker no longer shows the position (closed outside this agent?)" });
-        return true;
+      try {
+        if (!(await findHeldCall(client, accountId))) {
+          logEvent({ event: "position_gone", optionSymbol: held.optionSymbol, detail: "broker no longer shows the position (closed outside this agent?)" });
+          return true;
+        }
+      } catch (err) {
+        console.warn("[monitor] reconcile skipped, positions unreachable:", err); // keep watching the stop
       }
     }
     await sleep(POLL_MS);

@@ -41,7 +41,7 @@ jobs:
           WEBULL_SANDBOX_ACCOUNT_ID: ${{ secrets.WEBULL_SANDBOX_ACCOUNT_ID }}
           SPX_CONTRACTS: "1"
           SPX_STRIKE_OFFSET: "10"
-          SPX_STOP_LOSS_PCT: "0.50"
+          SPX_STOP_LOSS_PCT: "0.25"
         run: npx tsx main.ts
 
       - name: Commit state + trade log

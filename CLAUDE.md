@@ -5,13 +5,13 @@ settle/retry design, 2026-09-28 crash fix, 2026-10-02 repricing fix, hosting
 via cron-job.org + GitHub Actions all apply unchanged). Same account, same
 Webull OpenAPI sandbox, same `webullClient.ts`/`optionsClient.ts`/`marketHours.ts`.
 
-## Strategy (same criteria as SPY)
+## Strategy (same as SPY except the stop)
 
 - **10:30am ET**: buy `SPX_CONTRACTS` (1) of the **SPXW CALL expiring today**
   nearest to `level - SPX_STRIKE_OFFSET` (**10 points**, the SPY $1 equivalent
   since SPX ~ 10x SPY; strikes are 5 apart). LIMIT, repriced up from the ask
   via `escalatingDiscount()`, no entry after 11:00am.
-- **Stop**: client-side, mid <= 50% of entry, polled every 15s.
+- **Stop**: client-side, mid <= 75% of entry (25% stop loss; was 50% until 2026-10-20), polled every 15s.
 - **EOD**: close at 3:45pm ET (12:45pm on half-days); exits are LIMIT sells
   repriced down from the bid until 1 min before close.
 
@@ -68,3 +68,9 @@ Both agents share one paper account; each only matches its own symbol.
   crashing, and the 5-minute reconcile in `monitor()` just skips a cycle.
   Not yet exercised live. First SPX day (2026-10-19): -$950, stop at -50%,
   all mechanics worked.
+- **2026-10-20: stop loss 50% -> 25%** (user's call, after a -$1,250 / -63% stop on
+  10-20 and -$950 on 10-19). Differs from the SPY agent, which stays at 50%.
+  Set in `spx-0dte.yml` (what Actions uses), `.env`, and `main.ts`'s default.
+  Caveat: a tighter stop on a 0DTE option triggers more often on normal noise
+  (it was already swinging +/-10% minute to minute), and the stop can still gap
+  through, so expect more small losses and cut-short winners.

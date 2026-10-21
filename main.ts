@@ -8,7 +8,7 @@
  *     to (level - SPX_STRIKE_OFFSET), i.e. slightly in the money. The default
  *     offset is 10 points: SPX trades ~10x SPY, so that is SPY's $1.
  *   - Watch it every POLL_MS. Close it if its mid price falls to
- *     (1 - SPX_STOP_LOSS_PCT) x the entry price (50% loss), or at 15
+ *     (1 - SPX_STOP_LOSS_PCT) x the entry price (25% loss), or at 15
  *     minutes before the close (3:45pm ET; 12:45pm on half-days), whichever
  *     comes first. At most one entry per day.
  *
@@ -53,7 +53,7 @@ const SYMBOL = "SPX";
 const ROOT = "SPXW";
 const CONTRACTS = parseInt(process.env.SPX_CONTRACTS ?? "1", 10);
 const STRIKE_OFFSET = parseFloat(process.env.SPX_STRIKE_OFFSET ?? "10");
-const STOP_LOSS_PCT = parseFloat(process.env.SPX_STOP_LOSS_PCT ?? "0.50");
+const STOP_LOSS_PCT = parseFloat(process.env.SPX_STOP_LOSS_PCT ?? "0.25");
 const POLL_MS = parseInt(process.env.SPX_POLL_MS ?? "15000", 10);
 /** SPX/SPY has been ~10.06 (SPY pays dividends, SPX doesn't); only used to
  * aim the parity lookup near the money, never as the price itself. */

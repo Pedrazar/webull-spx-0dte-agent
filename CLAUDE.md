@@ -74,3 +74,11 @@ Both agents share one paper account; each only matches its own symbol.
   Caveat: a tighter stop on a 0DTE option triggers more often on normal noise
   (it was already swinging +/-10% minute to minute), and the stop can still gap
   through, so expect more small losses and cut-short winners.
+- **2026-10-21: trailing stop added.** On 10-21 the option ran to $59.70
+  (+230%), crashed to $23.50, bounced, and only the EOD exit saved the gain.
+  Now, once mid >= 1.5x entry (`SPX_TRAIL_ARM`), the agent also exits if mid
+  falls 25% below its high-water mark (`SPX_TRAIL_PCT`; 0 disables), logged as
+  `exit_filled` reason `trailing_stop`. Replaying 10-21's minute data, this
+  would have sold ~$44 (+$2,600) vs the +$2,890 actually earned by holding
+  (the late bounce helped that day). Peak ignores quotes with >10% spreads.
+  Not yet exercised live; the fixed 25% initial stop is unchanged.

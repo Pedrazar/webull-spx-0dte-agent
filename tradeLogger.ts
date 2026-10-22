@@ -33,7 +33,7 @@ export type SpyEvent =
   | {
       event: "exit_filled";
       optionSymbol: string;
-      reason: "stop_loss" | "eod" ;
+      reason: "stop_loss" | "trailing_stop" | "eod";
       contracts: number;
       entryPrice: number;
       exitPrice: number; // weighted average across fills
@@ -60,7 +60,7 @@ export type SpyEvent =
   | {
       event: "exit_failed";
       optionSymbol: string;
-      reason: "stop_loss" | "eod";
+      reason: "stop_loss" | "trailing_stop" | "eod";
       detail: string;
     };
 
@@ -78,7 +78,7 @@ export interface DayState {
   contracts?: number;
   entryPrice?: number;
   exitPrice?: number;
-  exitReason?: "stop_loss" | "eod";
+  exitReason?: "stop_loss" | "trailing_stop" | "eod";
   realizedPnl?: number;
 }
 

@@ -54,6 +54,13 @@ const ROOT = "SPXW";
 const CONTRACTS = parseInt(process.env.SPX_CONTRACTS ?? "1", 10);
 const STRIKE_OFFSET = parseFloat(process.env.SPX_STRIKE_OFFSET ?? "10");
 const STOP_LOSS_PCT = parseFloat(process.env.SPX_STOP_LOSS_PCT ?? "0.25");
+/** Trailing stop (added 2026-10-21): once the option's mid has reached
+ * TRAIL_ARM x entry (1.5 = up 50%), also exit if it falls TRAIL_PCT below its
+ * high-water mark. With the defaults the trail's first level is 1.125x
+ * entry, so once armed a stop-out is always a profit. Set TRAIL_PCT=0 to
+ * disable. */
+const TRAIL_ARM = parseFloat(process.env.SPX_TRAIL_ARM ?? "1.5");
+const TRAIL_PCT = parseFloat(process.env.SPX_TRAIL_PCT ?? "0.25");
 const POLL_MS = parseInt(process.env.SPX_POLL_MS ?? "15000", 10);
 /** SPX/SPY has been ~10.06 (SPY pays dividends, SPX doesn't); only used to
  * aim the parity lookup near the money, never as the price itself. */
@@ -464,7 +471,7 @@ async function exitPosition(
   client: WebullClient,
   accountId: string,
   held: HeldCall,
-  reason: "stop_loss" | "eod",
+  reason: "stop_loss" | "trailing_stop" | "eod",
   giveUpAtMin: number
 ): Promise<boolean> {
   let proceeds = 0;
@@ -578,6 +585,9 @@ async function monitor(client: WebullClient, accountId: string, held: HeldCall):
 
   let lastLog = 0;
   let lastReconcile = Date.now();
+  // High-water mark of the mid. A restart (resume after a crash) restarts it
+  // from the current price, so the trail can only be looser, never wrong.
+  let peak = held.costPrice;
   for (;;) {
     if (nyMinutesOf(new Date()) >= exitMin) {
       return exitPosition(client, accountId, held, "eod", closeMin - 1);
@@ -587,9 +597,19 @@ async function monitor(client: WebullClient, accountId: string, held: HeldCall):
       console.log(`[monitor] STOP: mid ${q.mid} <= ${stopPrice}`);
       return exitPosition(client, accountId, held, "stop_loss", closeMin - 1);
     }
+    // Ignore wide-spread quotes for the peak so one bad print can't arm or
+    // ratchet the trail.
+    if (q && (q.ask - q.bid) / q.mid <= 0.1) peak = Math.max(peak, q.mid);
+    if (TRAIL_PCT > 0 && peak >= held.costPrice * TRAIL_ARM && q) {
+      const trailStop = round2(peak * (1 - TRAIL_PCT));
+      if (q.mid <= trailStop) {
+        console.log(`[monitor] TRAILING STOP: mid ${q.mid} <= ${trailStop} (peak ${peak}, entry ${held.costPrice})`);
+        return exitPosition(client, accountId, held, "trailing_stop", closeMin - 1);
+      }
+    }
     if (Date.now() - lastLog >= 60_000) {
       const pnl = q ? round2((q.mid - held.costPrice) * held.contracts * 100) : null;
-      console.log(`[monitor] bid ${q?.bid ?? "-"} ask ${q?.ask ?? "-"} mid ${q?.mid ?? "-"} | unrealized ${pnl ?? "?"}`);
+      console.log(`[monitor] bid ${q?.bid ?? "-"} ask ${q?.ask ?? "-"} mid ${q?.mid ?? "-"} | unrealized ${pnl ?? "?"} | peak ${peak}`);
       lastLog = Date.now();
     }
     // Every 5 minutes, confirm with the broker that we still hold it (it

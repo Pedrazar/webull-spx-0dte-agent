@@ -82,3 +82,5 @@ Both agents share one paper account; each only matches its own symbol.
   would have sold ~$44 (+$2,600) vs the +$2,890 actually earned by holding
   (the late bounce helped that day). Peak ignores quotes with >10% spreads.
   Not yet exercised live; the fixed 25% initial stop is unchanged.
+- **2026-10-21: trail width 25% -> 20%** (user's call). The first trail level is
+  now 1.2x entry (1.5 x 0.8), still always a profit once armed.

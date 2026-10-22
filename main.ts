@@ -60,7 +60,7 @@ const STOP_LOSS_PCT = parseFloat(process.env.SPX_STOP_LOSS_PCT ?? "0.25");
  * entry, so once armed a stop-out is always a profit. Set TRAIL_PCT=0 to
  * disable. */
 const TRAIL_ARM = parseFloat(process.env.SPX_TRAIL_ARM ?? "1.5");
-const TRAIL_PCT = parseFloat(process.env.SPX_TRAIL_PCT ?? "0.25");
+const TRAIL_PCT = parseFloat(process.env.SPX_TRAIL_PCT ?? "0.20");
 const POLL_MS = parseInt(process.env.SPX_POLL_MS ?? "15000", 10);
 /** SPX/SPY has been ~10.06 (SPY pays dividends, SPX doesn't); only used to
  * aim the parity lookup near the money, never as the price itself. */

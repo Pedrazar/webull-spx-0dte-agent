@@ -43,7 +43,7 @@ jobs:
           SPX_STRIKE_OFFSET: "10"
           SPX_STOP_LOSS_PCT: "0.25"
           SPX_TRAIL_ARM: "1.5"
-          SPX_TRAIL_PCT: "0.25"
+          SPX_TRAIL_PCT: "0.20"
         run: npx tsx main.ts
 
       - name: Commit state + trade log

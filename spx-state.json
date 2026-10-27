@@ -1,11 +1,11 @@
 {
-  "date": "2026-10-26",
+  "date": "2026-10-27",
   "entered": true,
-  "optionSymbol": "SPXW261026C07665000",
-  "strike": 7665,
+  "optionSymbol": "SPXW261027C07685000",
+  "strike": 7685,
   "contracts": 1,
-  "entryPrice": 17.3,
-  "exitPrice": 31,
+  "entryPrice": 16.9,
+  "exitPrice": 40.2,
   "exitReason": "trailing_stop",
-  "realizedPnl": 1370
+  "realizedPnl": 2330
 }

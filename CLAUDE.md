@@ -1,86 +1,39 @@
 # SPX 0DTE Call Agent
 
-Port of `../webull-spy-0dte-agent` (read its CLAUDE.md first: strategy,
-settle/retry design, 2026-09-28 crash fix, 2026-10-02 repricing fix, hosting
-via cron-job.org + GitHub Actions all apply unchanged). Same account, same
-Webull OpenAPI sandbox, same `webullClient.ts`/`optionsClient.ts`/`marketHours.ts`.
+Port of `../webull-spy-0dte-agent` (its CLAUDE.md covers the settle/retry design and the SPY-era incident fixes; they apply here unchanged). Same paper account, same Webull OpenAPI sandbox, same `webullClient.ts`/`optionsClient.ts`/`marketHours.ts`. Each agent only matches its own symbol.
 
-## Strategy (same as SPY except the stop)
+## Strategy
 
-- **10:30am ET**: buy `SPX_CONTRACTS` (1) of the **SPXW CALL expiring today**
-  nearest to `level - SPX_STRIKE_OFFSET` (**10 points**, the SPY $1 equivalent
-  since SPX ~ 10x SPY; strikes are 5 apart). LIMIT, repriced up from the ask
-  via `escalatingDiscount()`, no entry after 11:00am.
-- **Stop**: client-side, mid <= 75% of entry (25% stop loss; was 50% until 2026-10-20), polled every 15s.
-- **EOD**: close at 3:45pm ET (12:45pm on half-days); exits are LIMIT sells
-  repriced down from the bid until 1 min before close.
+- **10:30am ET**: buy `SPX_CONTRACTS` (1) of the **SPXW CALL expiring today** nearest to `level - SPX_STRIKE_OFFSET` (10 points, the SPY $1 equivalent; strikes are 5 apart). LIMIT, repriced up from the ask via `escalatingDiscount()` (3/6/12/24/48%), 10s per attempt. No entry after 11:00am.
+- **Stop**: client-side, exit if mid <= 75% of entry (`SPX_STOP_LOSS_PCT=0.25`), polled every 15s. Gaps through the level are normal (fills land at -25% to -29%, and -63% once).
+- **Trailing stop**: once mid >= 1.5x entry (`SPX_TRAIL_ARM`), also exit if mid falls 20% below its high-water mark (`SPX_TRAIL_PCT=0.20`, 0 disables). First trail level is 1.2x entry, so an armed trail exit is always a profit. Peak ignores quotes with >10% spreads. Logged as reason `trailing_stop`.
+- **EOD**: close at 3:45pm ET (12:45pm half-days); LIMIT sells repriced down from the bid until 1 min before close.
 
-## SPX-specific differences (live-verified 2026-10-16)
+Settings live in `.github/workflows/spx-0dte.yml` (what Actions uses), `.env`, and `main.ts` defaults; keep all three in sync.
 
-- **Root is SPXW.** Daily 0DTE contracts are `SPXW` (PM-settled). A chain query
-  with `underlying_symbols=SPX` returns both roots. On third Fridays (e.g.
-  2026-10-16) the AM-settled `SPX` monthly shares the date, so `enter()`
-  filters `root_symbol === "SPXW"`. Never trade the AM-settled root.
-- **Order leg `symbol` must be `SPXW`**, not `SPX` (preview rejects `SPX` with
-  OPENAPI_PARAM_ERR). `optionSymbol` is OCC, e.g. `SPXW261019C07650000`.
-- **No index quote.** Stock bars reject `SPX`/`.SPX`/`$SPX`/`^SPX` in both
-  `US_STOCK` and `US_INDEX`. `fetchSpxPrice()` derives the level from put-call
-  parity on 9 strikes around `SPY x 10.06` (median of `K + Cmid - Pmid`).
-  SPY x 10 alone is ~45 points off, so it is only used to aim the strikes, and
-  as a 1.5% sanity check. Returns null (entry skipped as `no_price`) if fewer
-  than 3 strikes have usable quotes.
-- **Tick size**: $0.05 under $3.00, $0.10 from $3.00. `snapToTick()` rounds buys
-  up and sells down. Preview does NOT enforce ticks (accepted 36.37), so
-  whether a real place rejects an off-tick price is unverified; snapping is
-  the safe assumption.
-- **Cash-settled, European**: no assignment into shares, so the SPY agent's
-  "close it by hand or get 100 shares" warning is gone; a stranded position
-  just settles at intrinsic. Premium is ~10x SPY's (~$2,000/contract at $1 ITM
-  equivalent), so dollar P&L per trade is ~10x.
-- Quotes are 15 min delayed (`delay_minutes: 15`), same as SPY.
+## SPX-specific facts (live-verified)
+
+- **Root is SPXW** (PM-settled dailies). A chain query with `underlying_symbols=SPX` returns both roots; on third Fridays the AM-settled `SPX` monthly shares the date, so `enter()` filters `root_symbol === "SPXW"`.
+- **Order leg `symbol` must be `SPXW`**, not `SPX` (OPENAPI_PARAM_ERR). Position `symbol` is accepted as either in `findHeldCall()`.
+- **No index quote.** `fetchSpxPrice()` derives the level from put-call parity (median of `K + Cmid - Pmid` over 9 strikes around SPY x 10.06; SPY x 10 alone is ~45 pts off). Returns null (entry skipped, `no_price`) if <3 strikes have quotes or it disagrees with SPY by >1.5%.
+- **Tick size**: $0.05 under $3, $0.10 above; `snapToTick()` rounds buys up and sells down.
+- **Cash-settled, European**: no share assignment; a stranded position just settles at intrinsic. Premium is ~10x SPY's (~$1,700-3,700 per contract), so dollar P&L is ~10x.
+- Quotes were 15 min delayed at first; recent sessions report `delay_minutes: 0`.
+- Broker position lookups (`findHeldCall()`) retry 6x with backoff; a post-exit failure logs `exit_failed`, never a false "closed" (added after a 429 crashed the SPY live agent).
+
+## Hosting
+
+Public repo `Pedrazar/webull-spx-0dte-agent`; 4 repo secrets (`WEBULL_APP_KEY`, `WEBULL_APP_SECRET`, `WEBULL_BASE_URL`, `WEBULL_SANDBOX_ACCOUNT_ID`); cron-job.org dispatches `spx-0dte.yml` at `20 7 * * 1-5` America/Los_Angeles (10:20am ET year-round). Don't dispatch before 10:10am ET (`main.ts` refuses; the session must fit the 6h runner cap). Trade log `spx-trades.jsonl` and `spx-state.json` are committed back by the workflow.
 
 ## Files
 
-- `main.ts`, `tradeLogger.ts` (`spx-trades.jsonl`, `spx-state.json`),
-  `testSpxChain.ts [YYYY-MM-DD]` (live check + BUY_TO_OPEN preview, no order).
-- `.github/workflows/spx-0dte.yml`: concurrency group `spx-0dte`.
+`main.ts` (session), `tradeLogger.ts`, `testSpxChain.ts [YYYY-MM-DD]` (live check + BUY_TO_OPEN preview, never orders).
 
-## Status as of 2026-10-16 (initial build)
+## Known behavior / open items
 
-Verified live: option chain (SPXW 0DTE), snapshots, parity level (7654.25 vs
-SPY-implied 7667), strike pick, BUY_TO_OPEN preview (accepted, est. $1,660).
+- **Unfilled entry (2026-11-05)**: SPX ripped, the call's ask went 36.6 -> 46.7 in 45s, and every repriced buy (+3% ... +24% over a stale ask) was cancelled; logged `order_not_filled`, no position. Not changed. A more aggressive first step would fix it at the cost of overpaying on normal days.
+- Holding to the close usually loses on stop/trail days (calls fade or expire worthless); the 10-21 run-to-close day is the exception. Reviews compare each exit against the contract's 4pm last price via a snapshot.
 
-**Not verified** (needs a real trading run): an actual fill, off-tick rejection
-behavior, SELL_TO_CLOSE, and the **positions shape for an SPXW position**
-(`findHeldCall()` accepts position `symbol` of either `SPX` or `SPXW` since the
-real one is unseen; check this first if a resume/exit ever misses a position).
-Hosting set up 2026-10-16: public repo `Pedrazar/webull-spx-0dte-agent`, 4 repo secrets, cron-job.org dispatch (`20 7 * * 1-5` America/Los_Angeles). First scheduled run: Monday 2026-10-19.
+## History
 
-Both agents share one paper account; each only matches its own symbol.
-
-## Change log
-
-- **2026-10-19: broker-position lookups now retry.** The sibling SPY live agent
-  crashed on a 429 from `/trading/assets/positions/list` right after its
-  stop-loss sell filled (red run, no `exit_filled` logged). `findHeldCall()`
-  now retries 6x with backoff and only throws if the broker stays unreachable;
-  the post-exit check logs `exit_failed` (never a false "closed") instead of
-  crashing, and the 5-minute reconcile in `monitor()` just skips a cycle.
-  Not yet exercised live. First SPX day (2026-10-19): -$950, stop at -50%,
-  all mechanics worked.
-- **2026-10-20: stop loss 50% -> 25%** (user's call, after a -$1,250 / -63% stop on
-  10-20 and -$950 on 10-19). Differs from the SPY agent, which stays at 50%.
-  Set in `spx-0dte.yml` (what Actions uses), `.env`, and `main.ts`'s default.
-  Caveat: a tighter stop on a 0DTE option triggers more often on normal noise
-  (it was already swinging +/-10% minute to minute), and the stop can still gap
-  through, so expect more small losses and cut-short winners.
-- **2026-10-21: trailing stop added.** On 10-21 the option ran to $59.70
-  (+230%), crashed to $23.50, bounced, and only the EOD exit saved the gain.
-  Now, once mid >= 1.5x entry (`SPX_TRAIL_ARM`), the agent also exits if mid
-  falls 25% below its high-water mark (`SPX_TRAIL_PCT`; 0 disables), logged as
-  `exit_filled` reason `trailing_stop`. Replaying 10-21's minute data, this
-  would have sold ~$44 (+$2,600) vs the +$2,890 actually earned by holding
-  (the late bounce helped that day). Peak ignores quotes with >10% spreads.
-  Not yet exercised live; the fixed 25% initial stop is unchanged.
-- **2026-10-21: trail width 25% -> 20%** (user's call). The first trail level is
-  now 1.2x entry (1.5 x 0.8), still always a profit once armed.
+- 2026-10-16 built; 10-19 first live run (-50% stop). 10-20 stop 50% -> 25% after a -$1,250 (-63%) gap-through. 10-21 trailing stop added (25%), 10-21 width changed to 20%. 10-19 position-lookup retry added.

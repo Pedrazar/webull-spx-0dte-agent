@@ -54,7 +54,7 @@ export type SpyEvent =
     }
   | {
       event: "skipped";
-      reason: "holiday" | "already_entered_today" | "past_entry_window" | "no_0dte_contract" | "no_quote" | "no_price" | "order_not_filled";
+      reason: "holiday" | "already_entered_today" | "past_entry_window" | "daily_risk_limit" | "early_close" | "no_0dte_contract" | "no_quote" | "no_price" | "order_not_filled";
       detail: string;
     }
   | {
@@ -64,14 +64,28 @@ export type SpyEvent =
       detail: string;
     };
 
+/** Which of the day's two entry slots is running (morning 10:30, midday
+ * 12:30 ET). Sequential, so one process-wide value is enough; every logged
+ * event carries it. Older log lines have no `slot` (= morning). */
+export type Slot = "morning" | "midday";
+let currentSlot: Slot = "morning";
+export function setSlot(s: Slot): void {
+  currentSlot = s;
+}
+export function getSlot(): Slot {
+  return currentSlot;
+}
+
 export function logEvent(e: SpyEvent): void {
-  const line = JSON.stringify({ ts: new Date().toISOString(), ...e });
+  const line = JSON.stringify({ ts: new Date().toISOString(), slot: currentSlot, ...e });
   fs.appendFileSync(LOG_PATH, line + "\n");
   console.log(`[event] ${line}`);
 }
 
-export interface DayState {
-  date: string; // NY date
+/** One entry slot's trade. The morning trade lives flat on DayState (the
+ * original shape, so nothing reading the state file breaks); the midday
+ * trade lives under `midday`. */
+export interface TradeState {
   entered: boolean;
   optionSymbol?: string;
   strike?: number;
@@ -80,6 +94,11 @@ export interface DayState {
   exitPrice?: number;
   exitReason?: "stop_loss" | "trailing_stop" | "eod";
   realizedPnl?: number;
+}
+
+export interface DayState extends TradeState {
+  date: string; // NY date
+  midday?: TradeState;
 }
 
 export function readState(): DayState | null {
@@ -92,4 +111,13 @@ export function readState(): DayState | null {
 
 export function writeState(s: DayState): void {
   fs.writeFileSync(STATE_PATH, JSON.stringify(s, null, 2) + "\n");
+}
+
+/** Merges a patch into the current slot's trade record for `date` (starting a
+ * fresh day record if the file holds an older date). */
+export function saveTrade(date: string, patch: Partial<TradeState>): void {
+  const cur = readState();
+  const base: DayState = cur?.date === date ? cur : { date, entered: false };
+  if (currentSlot === "morning") writeState({ ...base, ...patch });
+  else writeState({ ...base, midday: { entered: false, ...base.midday, ...patch } });
 }

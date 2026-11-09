@@ -7,6 +7,7 @@ Port of `../webull-spy-0dte-agent` (its CLAUDE.md covers the settle/retry design
 - **10:30am ET**: buy `SPX_CONTRACTS` (1) of the **SPXW CALL expiring today** nearest to `level - SPX_STRIKE_OFFSET` (10 points, the SPY $1 equivalent; strikes are 5 apart). LIMIT, repriced up from the ask via `escalatingDiscount()` (3/6/12/24/48%), 10s per attempt. No entry after 11:00am.
 - **Stop**: client-side, exit if mid <= 75% of entry (`SPX_STOP_LOSS_PCT=0.25`), polled every 15s. Gaps through the level are normal (fills land at -25% to -29%, and -63% once).
 - **Trailing stop**: once mid >= 1.5x entry (`SPX_TRAIL_ARM`), also exit if mid falls 20% below its high-water mark (`SPX_TRAIL_PCT=0.20`, 0 disables). First trail level is 1.2x entry, so an armed trail exit is always a profit. Peak ignores quotes with >10% spreads. Logged as reason `trailing_stop`.
+- **Second trade, 12:30pm ET (added 2026-11-09)**: same rules, only after the morning trade is **closed**, so at most one position is ever open. Skipped (logged `skipped`) if: the morning trade is still open past 12:35 (`past_entry_window`); today's realized P&L is at or below `-SPX_DAILY_RISK_LIMIT` (default $1,000, `daily_risk_limit`); or the EOD exit leaves <60 min (`early_close`). The limit stops a second entry after a bad morning but does not cap the second trade's own loss (a full stop after a -$900 morning could end the day near -$1,500). If the morning didn't trade at all, the midday trade still runs. Slots run sequentially in one process; every logged event carries `slot` (older lines without it are morning). `spx-state.json` keeps the morning trade flat and the midday trade under `midday`.
 - **EOD**: close at 3:45pm ET (12:45pm half-days); LIMIT sells repriced down from the bid until 1 min before close.
 
 Settings live in `.github/workflows/spx-0dte.yml` (what Actions uses), `.env`, and `main.ts` defaults; keep all three in sync.
@@ -18,8 +19,8 @@ Settings live in `.github/workflows/spx-0dte.yml` (what Actions uses), `.env`, a
 - **No index quote.** `fetchSpxPrice()` derives the level from put-call parity (median of `K + Cmid - Pmid` over 9 strikes around SPY x 10.06; SPY x 10 alone is ~45 pts off). Returns null (entry skipped, `no_price`) if <3 strikes have quotes or it disagrees with SPY by >1.5%.
 - **Tick size**: $0.05 under $3, $0.10 above; `snapToTick()` rounds buys up and sells down.
 - **Cash-settled, European**: no share assignment; a stranded position just settles at intrinsic. Premium is ~10x SPY's (~$1,700-3,700 per contract), so dollar P&L is ~10x.
-- Quotes were 15 min delayed at first; recent sessions report `delay_minutes: 0`.
-- Broker position lookups (`findHeldCall()`) retry 6x with backoff; a post-exit failure logs `exit_failed`, never a false "closed" (added after a 429 crashed the SPY live agent).
+- Quotes report `delay_minutes: 0` (were 15 min delayed early on).
+- Broker position lookups (`findHeldCall()`) retry 6x with backoff; a post-exit failure logs `exit_failed`, never a false "closed".
 
 ## Hosting
 
@@ -36,4 +37,5 @@ Public repo `Pedrazar/webull-spx-0dte-agent`; 4 repo secrets (`WEBULL_APP_KEY`, 
 
 ## History
 
+- 2026-11-09 midday slot + daily risk limit added (not yet exercised live).
 - 2026-10-16 built; 10-19 first live run (-50% stop). 10-20 stop 50% -> 25% after a -$1,250 (-63%) gap-through. 10-21 trailing stop added (25%), 10-21 width changed to 20%. 10-19 position-lookup retry added.

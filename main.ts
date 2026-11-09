@@ -46,7 +46,7 @@ import {
   Position,
 } from "./optionsClient";
 import { isMarketHoliday, nyMinutesOf, marketCloseMinutes, todayNyDate } from "./marketHours";
-import { logEvent, readState, writeState, DayState } from "./tradeLogger";
+import { logEvent, readState, saveTrade, setSlot, Slot } from "./tradeLogger";
 
 const SYMBOL = "SPX";
 /** Root of the daily/weekly PM-settled contracts; also the order leg symbol. */
@@ -68,6 +68,22 @@ const SPX_PER_SPY = 10.06;
 
 const ENTRY_MIN = 10 * 60 + 30; // 10:30am ET
 const ENTRY_DEADLINE_MIN = 11 * 60; // don't enter late if the session started late
+/** Second daily trade (added 2026-11-09). Sequential, not concurrent: it only
+ * happens after the morning trade is CLOSED, so it's skipped if the morning
+ * trade is still open past the short grace window (so at most one position
+ * is ever open). Also skipped if today's realized P&L has hit the daily risk
+ * limit. */
+const MIDDAY_MIN = 12 * 60 + 30; // 12:30pm ET
+const MIDDAY_DEADLINE_MIN = MIDDAY_MIN + 5;
+/** Need at least this long between the midday entry and the EOD exit. */
+const MIDDAY_MIN_HOLD_MIN = 60;
+/** Midday entry is skipped once today's realized P&L is at or below minus
+ * this (USD). A stop-out on a ~$2,500 contract loses ~$600-900, so $1,000
+ * blocks the second trade after roughly one bad morning (matches the
+ * supervisor's per-agent SPX figure). It does not cap the midday trade's own
+ * loss: after a -$900 morning, a full stop could still end the day near
+ * -$1,500. */
+const DAILY_RISK_LIMIT = parseFloat(process.env.SPX_DAILY_RISK_LIMIT ?? "1000");
 const EXIT_BEFORE_CLOSE_MIN = 15; // 3:45pm ET on a normal day
 /** On Actions, a session started before this can't reach the EOD exit
  * inside the 6-hour runner cap (10:10 -> 15:50 is 340 min + setup). */
@@ -568,8 +584,7 @@ async function exitPosition(
     realizedPnl,
     pctReturn: round2(((exitPrice - held.costPrice) / held.costPrice) * 100),
   });
-  const state = readState();
-  if (state) writeState({ ...state, exitPrice, exitReason: reason, realizedPnl });
+  saveTrade(todayNyDate(), { exitPrice, exitReason: reason, realizedPnl });
   return true;
 }
 
@@ -643,22 +658,35 @@ export async function runSession(client: WebullClient, accountId: string): Promi
   }
 
   // Resume first: a position we already hold (e.g. after a crashed/re-run
-  // job) is always managed, whatever the clock or state file say.
+  // job) is always managed, whatever the clock or state file say. Which slot
+  // it belongs to is decided by the state file (midday only if its symbol
+  // matches the midday record); a morning resume goes on to the midday
+  // trade once it closes.
   const existing = await findHeldCall(client, accountId);
   if (existing) {
     const state = readState();
-    if (state?.date === today && state.entryPrice) existing.costPrice = state.entryPrice;
+    const today0 = state?.date === today ? state : null;
+    const slot: Slot = today0?.midday?.optionSymbol === existing.optionSymbol ? "midday" : "morning";
+    setSlot(slot);
+    const rec = slot === "midday" ? today0?.midday : today0;
+    if (rec?.entryPrice) existing.costPrice = rec.entryPrice;
     logEvent({ event: "resumed", optionSymbol: existing.optionSymbol, contracts: existing.contracts, entryPrice: existing.costPrice, detail: "found an open 0DTE call at startup" });
-    writeState({ date: today, entered: true, optionSymbol: existing.optionSymbol, strike: existing.strike, contracts: existing.contracts, entryPrice: existing.costPrice });
-    return monitor(client, accountId, existing);
+    saveTrade(today, { entered: true, optionSymbol: existing.optionSymbol, strike: existing.strike, contracts: existing.contracts, entryPrice: existing.costPrice });
+    const ok = await monitor(client, accountId, existing);
+    return ok && slot === "morning" ? runMidday(client, accountId, today) : ok;
   }
 
   const state = readState();
   if (state?.date === today && state.entered) {
-    logEvent({ event: "skipped", reason: "already_entered_today", detail: `already traded ${state.optionSymbol} today` });
-    return true;
+    // Morning already traded and (no position held) closed.
+    if (state.midday?.entered) {
+      logEvent({ event: "skipped", reason: "already_entered_today", detail: `already traded ${state.optionSymbol} and ${state.midday.optionSymbol} today` });
+      return true;
+    }
+    return runMidday(client, accountId, today);
   }
 
+  setSlot("morning");
   for (;;) {
     const min = nyMinutesOf(new Date());
     if (min >= ENTRY_MIN) break;
@@ -667,13 +695,52 @@ export async function runSession(client: WebullClient, accountId: string): Promi
   }
   if (nyMinutesOf(new Date()) >= ENTRY_DEADLINE_MIN) {
     logEvent({ event: "skipped", reason: "past_entry_window", detail: `session reached entry at ${hhmm(nyMinutesOf(new Date()))} ET, after the ${hhmm(ENTRY_DEADLINE_MIN)} cutoff` });
+  } else {
+    const held = await enter(client, accountId);
+    if (held) {
+      saveTrade(today, { entered: true, optionSymbol: held.optionSymbol, strike: held.strike, contracts: held.contracts, entryPrice: held.costPrice });
+      if (!(await monitor(client, accountId, held))) return false;
+    }
+  }
+  return runMidday(client, accountId, today);
+}
+
+/** The 12:30pm ET trade. Called only once the morning trade is closed (or
+ * never happened). Waits for 12:30, then checks, in order: it isn't too late
+ * (the morning trade may have closed after the window), there's still time
+ * to hold before the EOD exit, and the daily risk limit isn't hit. */
+async function runMidday(client: WebullClient, accountId: string, today: string): Promise<boolean> {
+  setSlot("midday");
+  const exitMin = marketCloseMinutes() - EXIT_BEFORE_CLOSE_MIN;
+  if (exitMin - MIDDAY_MIN < MIDDAY_MIN_HOLD_MIN) {
+    logEvent({ event: "skipped", reason: "early_close", detail: `EOD exit at ${hhmm(exitMin)} ET leaves under ${MIDDAY_MIN_HOLD_MIN} min after the ${hhmm(MIDDAY_MIN)} entry` });
+    return true;
+  }
+  for (;;) {
+    const min = nyMinutesOf(new Date());
+    if (min >= MIDDAY_MIN) break;
+    console.log(`[session] waiting for ${hhmm(MIDDAY_MIN)} ET midday entry (now ${hhmm(min)})`);
+    await sleep(Math.min(60_000, (MIDDAY_MIN - min) * 60_000));
+  }
+  const now = nyMinutesOf(new Date());
+  if (now >= MIDDAY_DEADLINE_MIN) {
+    logEvent({ event: "skipped", reason: "past_entry_window", detail: `morning trade was still open at ${hhmm(MIDDAY_MIN)} (or the session is late): at ${hhmm(now)} ET, past the ${hhmm(MIDDAY_DEADLINE_MIN)} cutoff` });
     return true;
   }
 
+  // Daily risk limit: realized P&L so far today (the morning trade; 0 if it
+  // never traded). Read from the state file, which exitPosition() updates.
+  const state = readState();
+  const realizedToday = state?.date === today ? state.realizedPnl ?? 0 : 0;
+  if (realizedToday <= -DAILY_RISK_LIMIT) {
+    logEvent({ event: "skipped", reason: "daily_risk_limit", detail: `today's realized P&L is $${round2(realizedToday)} (<= -$${DAILY_RISK_LIMIT} limit) — skipping the midday entry` });
+    return true;
+  }
+  console.log(`[midday] realized today $${round2(realizedToday)}, limit -$${DAILY_RISK_LIMIT} — entering`);
+
   const held = await enter(client, accountId);
   if (!held) return true;
-  const entered: DayState = { date: today, entered: true, optionSymbol: held.optionSymbol, strike: held.strike, contracts: held.contracts, entryPrice: held.costPrice };
-  writeState(entered);
+  saveTrade(today, { entered: true, optionSymbol: held.optionSymbol, strike: held.strike, contracts: held.contracts, entryPrice: held.costPrice });
   return monitor(client, accountId, held);
 }
 

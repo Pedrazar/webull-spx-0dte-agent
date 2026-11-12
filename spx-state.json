@@ -1,21 +1,21 @@
 {
-  "date": "2026-11-11",
+  "date": "2026-11-12",
   "entered": true,
-  "optionSymbol": "SPXW261111C07580000",
+  "optionSymbol": "SPXW261112C07580000",
   "strike": 7580,
   "contracts": 1,
-  "entryPrice": 17.3,
-  "exitPrice": 25.4,
+  "entryPrice": 23.6,
+  "exitPrice": 57.9,
   "exitReason": "trailing_stop",
-  "realizedPnl": 810,
+  "realizedPnl": 3430,
   "midday": {
     "entered": true,
-    "optionSymbol": "SPXW261111C07620000",
+    "optionSymbol": "SPXW261112C07620000",
     "strike": 7620,
     "contracts": 1,
-    "entryPrice": 13.7,
-    "exitPrice": 22.8,
-    "exitReason": "trailing_stop",
-    "realizedPnl": 910
+    "entryPrice": 16.4,
+    "exitPrice": 12,
+    "exitReason": "stop_loss",
+    "realizedPnl": -440
   }
 }

@@ -54,7 +54,7 @@ export type SpyEvent =
     }
   | {
       event: "skipped";
-      reason: "holiday" | "already_entered_today" | "past_entry_window" | "daily_risk_limit" | "early_close" | "no_0dte_contract" | "no_quote" | "no_price" | "order_not_filled";
+      reason: "holiday" | "already_entered_today" | "past_entry_window" | "daily_risk_limit" | "early_close" | "no_0dte_contract" | "no_quote" | "no_price" | "order_not_filled" | "supervisor_paused";
       detail: string;
     }
   | {

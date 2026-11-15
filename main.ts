@@ -47,6 +47,7 @@ import {
 } from "./optionsClient";
 import { isMarketHoliday, nyMinutesOf, marketCloseMinutes, todayNyDate } from "./marketHours";
 import { logEvent, readState, saveTrade, setSlot, Slot } from "./tradeLogger";
+import { supervisorPause } from "./supervisorControl";
 
 const SYMBOL = "SPX";
 /** Root of the daily/weekly PM-settled contracts; also the order leg symbol. */
@@ -392,6 +393,13 @@ async function settleOrder(client: WebullClient, accountId: string, clientOrderI
 
 async function enter(client: WebullClient, accountId: string): Promise<HeldCall | null> {
   const today = todayNyDate();
+  // Supervisor pause switch (webull-supervisor control.json): blocks NEW
+  // entries only; an open position is always managed and closed as usual.
+  const pause = await supervisorPause("spx-0dte");
+  if (pause.paused) {
+    logEvent({ event: "skipped", reason: "supervisor_paused", detail: pause.reason ?? "paused by supervisor" });
+    return null;
+  }
   const price = await fetchSpxPrice(client);
   if (price === null) {
     logEvent({ event: "skipped", reason: "no_price", detail: "SPX level could not be derived" });
